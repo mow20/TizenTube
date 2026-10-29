@@ -15,6 +15,8 @@ import { t } from 'i18next';
  *
  * Seems like for now dropping just the adPlacements is enough for YouTube TV
  */
+const AD_MARKERS = /"(adPlacements|adSlots|playerAds|adSlotRenderer|adClientParams)"/;
+
 const origParse = JSON.parse;
 JSON.parse = function () {
   const r = origParse.apply(this, arguments);
@@ -27,18 +29,11 @@ JSON.parse = function () {
       console.log(r.playbackContext.contentPlaybackContext);
     }
 
-    if (r.adPlacements && adBlockEnabled) {
-      r.adPlacements = [];
-    }
-
-    // Also set playerAds to false, just incase.
-    if (r.playerAds && adBlockEnabled) {
-      r.playerAds = false;
-    }
-
-    // Also set adSlots to an empty array, emptying only the adPlacements won't work.
-    if (r.adSlots && adBlockEnabled) {
-      r.adSlots = [];
+    // Drop ad data wherever it is in the response, not only at the top level.
+    // Some responses (e.g. the ones fetched when the app is resumed from the
+    // background) carry the player response nested inside another object.
+    if (adBlockEnabled && typeof arguments[0] === 'string' && AD_MARKERS.test(arguments[0])) {
+      stripAds(r);
     }
 
     if (r.paidContentOverlay && !configRead('enablePaidPromotionOverlay')) {
@@ -101,13 +96,6 @@ JSON.parse = function () {
     if (r.messages && Array.isArray(r.messages) && !configRead('enableYouThereRenderer')) {
       r.messages = r.messages.filter(
         (msg) => !msg?.youThereRenderer
-      );
-    }
-
-    // Remove shorts ads
-    if (!Array.isArray(r) && r?.entries && adBlockEnabled) {
-      r.entries = r.entries?.filter(
-        (elm) => !elm?.command?.reelWatchEndpoint?.adClientParams?.isAd
       );
     }
 
@@ -338,9 +326,61 @@ window.JSON.stringify = JSON.stringify;
 
 // Patch JSON.parse to use the custom one
 window.JSON.parse = JSON.parse;
-for (const key in window._yttv) {
-  if (window._yttv[key] && window._yttv[key].JSON && window._yttv[key].JSON.parse) {
-    window._yttv[key].JSON.parse = JSON.parse;
+function patchYttvJSON() {
+  for (const key in window._yttv) {
+    if (window._yttv[key] && window._yttv[key].JSON && window._yttv[key].JSON.parse !== JSON.parse) {
+      window._yttv[key].JSON.parse = JSON.parse;
+    }
+  }
+}
+patchYttvJSON();
+
+// Modules can be (re)created while the app is in the background, so patch
+// them again when it comes back to the foreground.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') patchYttvJSON();
+});
+window.addEventListener('pageshow', patchYttvJSON);
+
+// Native fetch's Response.json() doesn't go through JSON.parse, so route it
+// through the patched one.
+if (window.Response && window.Response.prototype.json) {
+  window.Response.prototype.json = function () {
+    return this.text().then((text) => JSON.parse(text));
+  };
+}
+
+// Same for XHRs with responseType 'json', which are parsed natively. The
+// parsed object can't be fed back through JSON.parse, so only strip the ads.
+const xhrResponse = window.XMLHttpRequest && Object.getOwnPropertyDescriptor(XMLHttpRequest.prototype, 'response');
+if (xhrResponse?.get && xhrResponse.configurable) {
+  Object.defineProperty(XMLHttpRequest.prototype, 'response', {
+    configurable: true,
+    enumerable: xhrResponse.enumerable,
+    get() {
+      const res = xhrResponse.get.call(this);
+      if (this.responseType === 'json' && res && configRead('enableAdBlock')) stripAds(res);
+      return res;
+    }
+  });
+}
+
+function stripAds(node) {
+  if (!node || typeof node !== 'object') return;
+  if (Array.isArray(node)) {
+    for (let i = node.length - 1; i >= 0; i--) {
+      if (node[i]?.adSlotRenderer || node[i]?.command?.reelWatchEndpoint?.adClientParams?.isAd) {
+        node.splice(i, 1);
+        continue;
+      }
+      stripAds(node[i]);
+    }
+    return;
+  }
+  for (const key in node) {
+    if (key === 'adPlacements' || key === 'adSlots') node[key] = [];
+    else if (key === 'playerAds') node[key] = false;
+    else stripAds(node[key]);
   }
 }
 

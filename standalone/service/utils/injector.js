@@ -8,15 +8,44 @@ const fetch = require('node-fetch');
 var isConnecting = false;
 const isTizen3 = tizen.systeminfo.getCapability('http://tizen.org/feature/platform.version').startsWith('3.0');
 
+// Keep the last downloaded userscript for as long as the service runs, so a
+// relaunched or reloaded page (e.g. after coming back from the background)
+// gets it injected right away instead of waiting on the CDN while YouTube's
+// own scripts are already running. Each launch refreshes it in the
+// background, so updates still arrive by the next launch.
+var modFile = null;
+var modFileRequest = null;
+function refreshModFile() {
+    if (!modFileRequest) {
+        modFileRequest = fetch('https://cdn.jsdelivr.net/npm/@foxreis/tizentube/dist/userScript.js').then(res => {
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.text();
+        }).then(text => {
+            modFile = text;
+            modFileRequest = null;
+            return text;
+        }).catch(e => {
+            modFileRequest = null;
+            throw e;
+        });
+    }
+    return modFileRequest;
+}
+
+function getModFile() {
+    return modFile ? Promise.resolve(modFile) : refreshModFile();
+}
+
 function connectToDebugger(host, port, args) {
     fetch(`http://${host}:${port}`).then(_ => {
+        refreshModFile().catch(() => { });
         CDP({ host, port, local: true }, client => {
             isConnecting = false;
             client.Runtime.enable();
             client.Page.enable();
 
             client.on('Runtime.executionContextCreated', m => {
-                fetch('https://cdn.jsdelivr.net/npm/@foxreis/tizentube/dist/userScript.js').then(res => res.text()).then(modFile => {
+                getModFile().then(modFile => {
                     client.Runtime.evaluate({ expression: modFile, contextId: m.context.id });
                 }).catch(e => {
                     client.Runtime.evaluate({ expression: 'alert("Failed to request to JSDelivr CDN.")', contextId: m.context.id });
