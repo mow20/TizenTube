@@ -8,6 +8,7 @@ const net = require('net');
 const tls = require('tls');
 const forge = require('node-forge');
 const url = require('url');
+const userScriptUrl = require('./userScriptUrl.js');
 
 const proxyPort = 8101;
 
@@ -155,7 +156,7 @@ function startServer() {
                                 ''
                             );
 
-                            body = body.replace('</body>', `<script src="https://cdn.jsdelivr.net/npm/@foxreis/tizentube/dist/userScript.js?ver=${Date.now()}"></script></body>`);
+                            body = body.replace('</body>', `<script src="${userScriptUrl}?ver=${Date.now()}"></script></body>`);
 
                             headers['content-length'] = Buffer.byteLength(body, 'utf8');
                             headers['connection'] = 'close';

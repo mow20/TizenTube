@@ -11,6 +11,7 @@ const startServer = require('./utils/cobaltProxyServer.js');
 const URL = require('url');
 const path = require('path');
 const injector = require('./utils/injector.js');
+const userScriptUrl = require('./utils/userScriptUrl.js');
 
 app.use((req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -140,7 +141,7 @@ app.all('*', (req, res) => {
                 return response.text().then((text) => {
                     if (req.url.indexOf('/tv') === 0 && req.url.indexOf('/tv_config') === -1) {
                         // Insert the userscript for TizenTube
-                        text += `<script src="https://cdn.jsdelivr.net/npm/@foxreis/tizentube/dist/userScript.js?ver=${Date.now()}"></script>`;
+                        text += `<script src="${userScriptUrl}?ver=${Date.now()}"></script>`;
                     }
 
                     const proxyPrefix = `http://localhost:${PORT}/cors-bypass/`;

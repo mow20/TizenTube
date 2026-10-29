@@ -1,0 +1,53 @@
+name: Publish userscript
+
+# Builds mods/ into userScript.js and pushes it to the "userscript" branch,
+# where the standalone app loads it from through jsDelivr
+# (https://cdn.jsdelivr.net/gh/<owner>/<repo>@userscript/userScript.js).
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'mods/**'
+      - '.github/workflows/publish-userscript.yaml'
+  workflow_dispatch:
+
+concurrency:
+  group: publish-userscript
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build userscript
+        working-directory: mods
+        run: |
+          npm install
+          npm run build
+
+      - name: Push to the userscript branch
+        run: |
+          mkdir publish
+          cp dist/userScript.js publish/
+          cd publish
+          git init -q -b userscript
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add userScript.js
+          git commit -q -m "Build of ${GITHUB_SHA}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git" userscript
+
+      - name: Purge jsDelivr cache
+        run: |
+          curl -sS --fail --retry 3 "https://purge.jsdelivr.net/gh/${GITHUB_REPOSITORY}@userscript/userScript.js"

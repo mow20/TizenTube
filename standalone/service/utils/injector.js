@@ -3,6 +3,7 @@
 const adbhost = require('adbhost');
 const CDP = require('chrome-remote-interface');
 const fetch = require('node-fetch');
+const userScriptUrl = require('./userScriptUrl.js');
 
 
 var isConnecting = false;
@@ -17,7 +18,7 @@ var modFile = null;
 var modFileRequest = null;
 function refreshModFile() {
     if (!modFileRequest) {
-        modFileRequest = fetch('https://cdn.jsdelivr.net/npm/@foxreis/tizentube/dist/userScript.js').then(res => {
+        modFileRequest = fetch(userScriptUrl).then(res => {
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             return res.text();
         }).then(text => {
