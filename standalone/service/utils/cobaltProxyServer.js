@@ -8,11 +8,49 @@ const net = require('net');
 const tls = require('tls');
 const forge = require('node-forge');
 const url = require('url');
+const fetch = require('node-fetch');
 const userScriptUrl = require('./userScriptUrl.js');
 
 const proxyPort = 8101;
 
+// The userscript is kept here (and on disk, so it survives a service restart)
+// and written inline into /tv. Loading it with <script src> meant a CDN
+// download on every page load: right after the TV wakes up that download often
+// failed or came in after YouTube had started, leaving TizenTube missing or
+// half applied. Every /tv load refreshes the copy in the background, so
+// updates arrive by the next load.
+const userScriptCachePath = '/home/owner/share/tizentube-userscript.js';
+let userScript = null;
+try {
+    userScript = fs.readFileSync(userScriptCachePath, 'utf8') || null;
+} catch (e) { }
+
+let userScriptRequest = null;
+function refreshUserScript() {
+    if (userScriptRequest) return;
+    userScriptRequest = fetch(userScriptUrl).then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.text();
+    }).then(text => {
+        if (!text) return;
+        userScript = text;
+        fs.writeFileSync(userScriptCachePath + '.tmp', text);
+        fs.renameSync(userScriptCachePath + '.tmp', userScriptCachePath);
+    }).catch(() => { }).then(() => {
+        userScriptRequest = null;
+    });
+}
+
+function userScriptTag() {
+    // Only on the very first run, before any copy was downloaded.
+    if (!userScript) return `<script src="${userScriptUrl}?ver=${Date.now()}"></script>`;
+    // "</script" would end the inline element early.
+    return `<script>${userScript.replace(/<\/script/gi, '<\\/script')}</script>`;
+}
+
 function startServer() {
+    refreshUserScript();
+
     const caCertificate = forge.pki.certificateFromPem(
         fs.readFileSync('/home/owner/share/tizentube-ca.crt', 'utf8')
     );
@@ -156,7 +194,11 @@ function startServer() {
                                 ''
                             );
 
-                            body = body.replace('</body>', `<script src="${userScriptUrl}?ver=${Date.now()}"></script></body>`);
+                            // A function, so "$&" and the like in the script are not
+                            // read as replacement patterns.
+                            const scriptTag = userScriptTag();
+                            body = body.replace('</body>', () => scriptTag + '</body>');
+                            refreshUserScript();
 
                             headers['content-length'] = Buffer.byteLength(body, 'utf8');
                             headers['connection'] = 'close';
