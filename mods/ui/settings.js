@@ -291,6 +291,11 @@ export default function modernUI(update, parameters) {
                     value: 'enableShorts'
                 },
                 {
+                    name: t('settings.options.misc.options.shortsAutoAdvance'),
+                    icon: 'YOUTUBE_SHORTS_FILL_24',
+                    value: 'enableShortsAutoAdvance'
+                },
+                {
                     name: t('settings.options.misc.options.videoPreviews'),
                     value: 'enablePreviews'
                 },
