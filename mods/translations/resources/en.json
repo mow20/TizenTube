@@ -61,6 +61,7 @@
                     "hqThumbnails": "Enable High Quality Thumbnails",
                     "longPress": "Enable Long Press Actions",
                     "shorts": "Enable Shorts",
+                    "shortsAutoAdvance": "Play the next Short when one ends",
                     "videoPreviews": "Enable Video Previews",
                     "ttWelcomeMsg": "Show TT Welcome Message",
                     "guestSignInReminder": "Show Guest Sign In Reminder",

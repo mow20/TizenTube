@@ -36,6 +36,10 @@ JSON.parse = function () {
       stripAds(r);
     }
 
+    if (configRead('enableShortsAutoAdvance') && typeof arguments[0] === 'string' && arguments[0].indexOf('"reelWatchEndpoint"') !== -1) {
+      setShortsAutoAdvance(r);
+    }
+
     if (r.paidContentOverlay && !configRead('enablePaidPromotionOverlay')) {
       r.paidContentOverlay = null;
     }
@@ -360,6 +364,7 @@ if (xhrResponse?.get && xhrResponse.configurable) {
     get() {
       const res = xhrResponse.get.call(this);
       if (this.responseType === 'json' && res && configRead('enableAdBlock')) stripAds(res);
+      if (this.responseType === 'json' && res && configRead('enableShortsAutoAdvance')) setShortsAutoAdvance(res);
       return res;
     }
   });
@@ -382,6 +387,19 @@ function stripAds(node) {
     else if (key === 'playerAds') node[key] = false;
     else stripAds(node[key]);
   }
+}
+
+// When a Short ends, YouTube TV plays the next one only if the Short's
+// reelWatchEndpoint asks for it (and no per-account SHORTS_AUTO_ADVANCE
+// override is set); otherwise it plays the same Short again. YouTube doesn't
+// send the field, so Shorts loop forever. Ask for auto-advance on every
+// endpoint: on the tile that opens Shorts and on each entry of the sequence.
+function setShortsAutoAdvance(node) {
+  if (!node || typeof node !== 'object') return;
+  if (node.reelWatchEndpoint && typeof node.reelWatchEndpoint === 'object') {
+    node.reelWatchEndpoint.tvhtml5DefaultLoopBehavior = 'REEL_LOOP_BEHAVIOR_AUTO_ADVANCE';
+  }
+  for (const key in node) setShortsAutoAdvance(node[key]);
 }
 
 

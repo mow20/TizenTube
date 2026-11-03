@@ -58,6 +58,7 @@
                     "hqThumbnails": "Habilitar miniaturas de alta calidad",
                     "longPress": "Habilitar acciones de pulsación larga",
                     "shorts": "Habilitar Shorts",
+                    "shortsAutoAdvance": "Pasar al siguiente Short al terminar",
                     "videoPreviews": "Habilitar vistas previas de video",
                     "ttWelcomeMsg": "Mostrar mensaje de bienvenida de TT",
                     "guestSignInReminder": "Mostrar recordatorio de inicio de sesión de invitado",
