@@ -107,6 +107,7 @@ function ResponseParser(request) {
     this.contentLength = null;
     this.chunked = false;
     this.chunkRemaining = null;
+    this.inTrailers = false;
     this.complete = false;
 }
 
@@ -286,7 +287,33 @@ ResponseParser.prototype.parseFixedLength = function () {
     return true;
 };
 
+ResponseParser.prototype.parseTrailers = function () {
+    if (
+        this.buffer.length >= 2 &&
+        this.buffer[0] === 13 &&
+        this.buffer[1] === 10
+    ) {
+        this.buffer = this.buffer.slice(2);
+        this.completeResponse();
+        return true;
+    }
+
+    var trailerEnd = this.buffer.indexOf("\r\n\r\n");
+
+    if (trailerEnd === -1) {
+        return false;
+    }
+
+    this.buffer = this.buffer.slice(trailerEnd + 4);
+    this.completeResponse();
+    return true;
+};
+
 ResponseParser.prototype.parseChunked = function () {
+    if (this.inTrailers) {
+        return this.parseTrailers();
+    }
+
     while (!this.complete) {
         if (this.chunkRemaining === null) {
             var lineEnd = this.buffer.indexOf("\r\n");
@@ -313,25 +340,10 @@ ResponseParser.prototype.parseChunked = function () {
             }
 
             if (size === 0) {
-                if (
-                    this.buffer.length >= 2 &&
-                    this.buffer[0] === 13 &&
-                    this.buffer[1] === 10
-                ) {
-                    this.buffer = this.buffer.slice(2);
-                    this.completeResponse();
-                    return true;
-                }
-
-                var trailerEnd = this.buffer.indexOf("\r\n\r\n");
-
-                if (trailerEnd === -1) {
-                    return false;
-                }
-
-                this.buffer = this.buffer.slice(trailerEnd + 4);
-                this.completeResponse();
-                return true;
+                // The "0" line is consumed, so remember that only the trailer
+                // section is left: it may arrive in a later packet.
+                this.inTrailers = true;
+                return this.parseTrailers();
             }
 
             this.chunkRemaining = size;

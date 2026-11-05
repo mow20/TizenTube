@@ -11,14 +11,20 @@ import getCommandExecutor from './customCommandExecution.js';
 import { t } from 'i18next';
 
 // It just works, okay?
+let domLoaded = false;
 const interval = setInterval(() => {
-  const videoElement = document.querySelector('video');
-  if (videoElement) {
+  if (!domLoaded && document.querySelector('video')) {
     execute_once_dom_loaded();
-    patchResolveCommand();
-    clearInterval(interval);
+    domLoaded = true;
   }
+  // Keep trying until YouTube's command router exists and is patched.
+  if (domLoaded && patchResolveCommand()) clearInterval(interval);
 }, 250);
+
+// Coming back from the background, YouTube may have replaced its router.
+document.addEventListener('visibilitychange', () => {
+  if (domLoaded && !document.hidden) patchResolveCommand();
+});
 
 let keyTimeout = null;
 
@@ -63,7 +69,7 @@ function execute_once_dom_loaded() {
   }
 
   // We handle key events ourselves.
-  window.__spatialNavigation__.keyMode = 'NONE';
+  if (window.__spatialNavigation__) window.__spatialNavigation__.keyMode = 'NONE';
 
   var ARROW_KEY_CODE = { 37: 'left', 38: 'up', 39: 'right', 40: 'down' };
 

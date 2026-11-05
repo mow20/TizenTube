@@ -6,9 +6,14 @@ window.isPipPlaying = false;
 let PlayerService = null;
 
 function pipLoad() {
-    const mappings = Object.values(window._yttv).find(a => a && a.mappings);
+    // YouTube's services may not exist yet: wait for them instead of throwing.
+    const mappings = window._yttv && Object.values(window._yttv).find(a => a && a.mappings);
+    const PlaybackPreviewService = mappings && mappings.get('PlaybackPreviewService');
+    if (!PlaybackPreviewService || !mappings.get('PlayerService')) {
+        setTimeout(pipLoad, 250);
+        return;
+    }
     PlayerService = mappings.get('PlayerService');
-    const PlaybackPreviewService = mappings.get('PlaybackPreviewService');
     const PlaybackPreviewServiceStart = PlaybackPreviewService.start;
     const PlaybackPreviewServiceStop = PlaybackPreviewService.stop;
 
