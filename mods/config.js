@@ -78,6 +78,10 @@ let localConfig;
 
 try {
   localConfig = JSON.parse(window.localStorage[CONFIG_KEY]);
+  // Valid JSON that isn't an object (e.g. "null") would make every read throw.
+  if (!localConfig || typeof localConfig !== 'object' || Array.isArray(localConfig)) {
+    throw new Error('Config is not an object');
+  }
 } catch (err) {
   console.warn('Config read failed:', err);
   localConfig = defaultConfig;

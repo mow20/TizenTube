@@ -30,9 +30,14 @@ export function findFunction(funcName) {
 
 // Patch resolveCommand to be able to change TizenTube settings
 
+// Safe to call again: an already patched resolveCommand is left alone, and one
+// YouTube replaced gets patched. Returns whether a patched one is in place.
 export function patchResolveCommand() {
+    let patched = false;
     for (const key in window._yttv) {
         if (window._yttv[key] && window._yttv[key].instance && window._yttv[key].instance.resolveCommand) {
+            patched = true;
+            if (window._yttv[key].instance.resolveCommand.isTizenTubePatch) continue;
 
             const ogResolve = window._yttv[key].instance.resolveCommand;
             window._yttv[key].instance.resolveCommand = function (cmd, _) {
@@ -191,8 +196,10 @@ export function patchResolveCommand() {
 
                 return ogResolve.call(this, cmd, _);
             }
+            window._yttv[key].instance.resolveCommand.isTizenTubePatch = true;
         }
     }
+    return patched;
 }
 
 function customAction(action, parameters) {

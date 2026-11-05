@@ -28,7 +28,9 @@ try {
 let userScriptRequest = null;
 function refreshUserScript() {
     if (userScriptRequest) return;
-    userScriptRequest = fetch(userScriptUrl).then(res => {
+    // Without a timeout, a request that hangs (right after the TV wakes up)
+    // would block every later refresh.
+    userScriptRequest = fetch(userScriptUrl, { timeout: 30000 }).then(res => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.text();
     }).then(text => {
@@ -119,8 +121,39 @@ function startServer() {
         clientSocket.on('error', () => targetSocket.destroy());
     }
 
-    const ytCertWWW = createHostCertificate('www.youtube.com');
-    const ytCert = createHostCertificate('youtube.com');
+    // Generating an RSA key in pure JS takes seconds on the TV, and the proxy
+    // only listens once both certificates exist. Keep them on disk so a
+    // service restart (e.g. after the TV was idle) is ready right away.
+    const hostCertCachePath = '/home/owner/share/tizentube-host-certs.json';
+    let hostCerts = {};
+    try {
+        hostCerts = JSON.parse(fs.readFileSync(hostCertCachePath, 'utf8')) || {};
+    } catch (e) { }
+
+    function getHostCertificate(hostname) {
+        const cached = hostCerts[hostname];
+        if (cached) {
+            try {
+                const certificate = forge.pki.certificateFromPem(cached.cert);
+                // Throws if this CA did not sign it (e.g. the CA was recreated).
+                if (caCertificate.verify(certificate) &&
+                    certificate.validity.notAfter.getTime() > Date.now() + 30 * 24 * 60 * 60 * 1000) {
+                    return cached;
+                }
+            } catch (e) { }
+        }
+
+        const created = createHostCertificate(hostname);
+        hostCerts[hostname] = created;
+        try {
+            fs.writeFileSync(hostCertCachePath + '.tmp', JSON.stringify(hostCerts));
+            fs.renameSync(hostCertCachePath + '.tmp', hostCertCachePath);
+        } catch (e) { }
+        return created;
+    }
+
+    const ytCertWWW = getHostCertificate('www.youtube.com');
+    const ytCert = getHostCertificate('youtube.com');
 
     function mitm(hostname, port, clientSocket, initialData) {
         clientSocket.write(
@@ -134,13 +167,20 @@ function startServer() {
         tlsServer.on('secureConnection', clientTlsSocket => {
             const httpServer = http.createServer(
                 (request, response) => {
-                    const isTvPath =
-                        request.url === '/tv' ||
-                        request.url.startsWith('/tv?');
+                    const pathname = request.url.split('?')[0];
+                    const isTvPath = pathname === '/tv' || pathname === '/tv/';
 
                     const reqHeaders = Object.assign({}, request.headers);
 
-                    if (isTvPath) reqHeaders['accept-encoding'] = 'identity';
+                    if (isTvPath) {
+                        reqHeaders['accept-encoding'] = 'identity';
+                        // Always get the full page: a 304 or a partial
+                        // response has no HTML to put the userscript in.
+                        delete reqHeaders['if-none-match'];
+                        delete reqHeaders['if-modified-since'];
+                        delete reqHeaders['range'];
+                        delete reqHeaders['if-range'];
+                    }
 
                     const httpsModule = parseInt(process.version.split('.')[0].replace('v', '')) >= 13 ? ogHttps : https;
 
@@ -156,7 +196,9 @@ function startServer() {
                     }, targetResponse => {
                         const headers = Object.assign({}, targetResponse.headers);
 
-                        if (!isTvPath) {
+                        const isHtml = /text\/html/i.test(headers['content-type'] || '');
+
+                        if (!isTvPath || !isHtml) {
                             response.writeHead(
                                 targetResponse.statusCode,
                                 headers
@@ -178,16 +220,36 @@ function startServer() {
                         ].join('; ');
 
                         const chunks = [];
+                        let finished = false;
+
+                        // If YouTube's response breaks off, fail the page
+                        // load instead of leaving Cobalt waiting forever.
+                        const abort = () => {
+                            if (finished) return;
+                            finished = true;
+                            response.destroy();
+                        };
+                        targetResponse.on('error', abort);
+                        targetResponse.on('aborted', abort);
 
                         targetResponse.on('data', chunk => chunks.push(chunk));
 
                         targetResponse.on('end', () => {
+                            if (finished) return;
+                            finished = true;
+
                             let body = Buffer.concat(chunks).toString('utf8');
 
                             delete headers['content-length'];
                             delete headers['transfer-encoding'];
                             delete headers['content-encoding'];
                             delete headers['connection'];
+                            // Never let Cobalt reuse a cached copy of this
+                            // page: only a fresh one gets the current script.
+                            delete headers['etag'];
+                            delete headers['last-modified'];
+                            delete headers['expires'];
+                            headers['cache-control'] = 'no-store';
 
                             body = body.replace(
                                 /<meta\b[^>]*http-equiv\s*=\s*["']Content-Security-Policy(?:-Report-Only)?["'][^>]*>/gi,
@@ -197,7 +259,11 @@ function startServer() {
                             // A function, so "$&" and the like in the script are not
                             // read as replacement patterns.
                             const scriptTag = userScriptTag();
-                            body = body.replace('</body>', () => scriptTag + '</body>');
+                            if (body.indexOf('</body>') !== -1) {
+                                body = body.replace('</body>', () => scriptTag + '</body>');
+                            } else {
+                                body += scriptTag;
+                            }
                             refreshUserScript();
 
                             headers['content-length'] = Buffer.byteLength(body, 'utf8');
@@ -262,7 +328,9 @@ function startServer() {
         const hostname = reqUrl[0];
         const port = reqUrl[1] || 443;
 
-        if (hostname !== 'youtube.com' && !hostname.endsWith('.youtube.com')) {
+        // Only these two hosts serve /tv, and only they have a certificate
+        // here: intercepting other *.youtube.com hosts would fail TLS.
+        if (hostname !== 'youtube.com' && hostname !== 'www.youtube.com') {
             return tunnel(
                 hostname,
                 Number(port),
@@ -277,6 +345,11 @@ function startServer() {
             clientSocket,
             initialData
         );
+    });
+
+    // E.g. the port still held by the previous instance after a restart.
+    proxyServer.on('error', () => {
+        setTimeout(() => proxyServer.listen(proxyPort, '0.0.0.0'), 1000);
     });
 
     proxyServer.listen(proxyPort, '0.0.0.0');
